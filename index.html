@@ -287,8 +287,8 @@
     // fails, say so instead of lying with a "Copied" label. The URL is selected
     // either way so a manual Ctrl+C always works.
     copyBtn.addEventListener('click', async ()=>{
-      urlIn.focus(); urlIn.select();
       const label = copyBtn.textContent;
+      urlIn.focus(); urlIn.select();
       let ok = false;
 
       try{
@@ -298,6 +298,10 @@
         ]);
         ok = true;
       }catch(e){
+        // Focus has moved to the button by now, which collapsed the selection,
+        // so re-establish it before copying. execCommand('copy') acts on the
+        // current selection -- without this the fallback copies nothing.
+        urlIn.focus(); urlIn.select();
         try{ ok = document.execCommand('copy'); }catch(e2){ ok = false; }
       }
 
@@ -307,6 +311,9 @@
         copyBtn.textContent = label;
         copyBtn.classList.remove('ok');
       }, 1400);
+
+      // Leave the URL selected after a failed copy so a manual Ctrl+C works.
+      if(!ok){ urlIn.focus(); urlIn.select(); }
     });
     copyBtn.addEventListener('dblclick', ()=>{ urlIn.focus(); urlIn.select(); });
 
