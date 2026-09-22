@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Archive Link Converter</title>
+<style>
+  :root{
+    --bg:#0e1013; --panel:#161a20; --panel2:#1d222a; --line:#2a303a;
+    --txt:#e8ecf1; --dim:#8b95a5; --accent:#4da3ff; --ok:#3ddc84; --bad:#ff5f56;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);min-height:100vh;
+    font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:flex;flex-direction:column}
+
+  header{padding:20px 22px 14px;border-bottom:1px solid var(--line)}
+  header h1{margin:0;font-size:16px;font-weight:600;letter-spacing:.2px}
+  header p{margin:5px 0 0;color:var(--dim);font-size:12.5px}
+
+  .wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+
+  .bar{display:flex;gap:9px;padding:16px 22px;background:var(--panel);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  input[type=text]{flex:1 1 420px;min-width:220px;background:var(--panel2);color:var(--txt);
+    border:1px solid var(--line);border-radius:9px;padding:12px 14px;
+    font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;outline:none}
+  input[type=text]:focus{border-color:var(--accent)}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--line);
+    border-radius:9px;padding:11px 16px;font-size:13px;cursor:pointer;white-space:nowrap}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#06101d;font-weight:600}
+  button.primary:hover{filter:brightness(1.1);color:#06101d}
+  button:disabled{opacity:.45;cursor:default}
+  button.ok{border-color:#25452f;color:var(--ok)}
+
+  main{flex:1;padding:20px 22px 40px;min-height:0}
+  .status{color:var(--dim);font-size:13px}
+  .status.err{color:#ffb4ae}
+  .status b{color:var(--txt)}
+
+  .item{font-size:13px;color:var(--dim);margin:0 0 16px}
+  .item b{color:var(--txt);font-size:14px;font-weight:600}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;
+    padding:14px 16px;margin-bottom:12px}
+  .card .top{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .card .fname{font:13px/1.4 ui-monospace,Menlo,monospace;word-break:break-all;font-weight:600}
+  .card .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  .b{background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+    padding:2px 9px;font-size:11px;color:var(--dim);font-family:ui-monospace,Menlo,monospace}
+  .b.hl{color:var(--ok);border-color:#25452f}
+  .card .acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
+  .card .acts button{font-size:12px;padding:8px 12px}
+
+  .urlbox{display:flex;gap:7px;margin-top:11px}
+  .urlbox input{flex:1;background:#0a0c0f;border:1px solid var(--line);color:var(--dim);
+    border-radius:8px;padding:9px 11px;font:12px/1.4 ui-monospace,Menlo,monospace;min-width:0}
+  .urlbox input:focus{outline:none;border-color:var(--accent);color:var(--txt)}
+
+  .prog{margin-top:11px;display:none}
+  .prog.on{display:block}
+  .track{height:7px;background:#0a0c0f;border-radius:4px;overflow:hidden;border:1px solid var(--line)}
+  .fill{height:100%;width:0;background:var(--accent);transition:width .12s linear}
+  .ptxt{font-size:11px;color:var(--dim);margin-top:5px;font-family:ui-monospace,Menlo,monospace}
+
+  video{width:100%;max-height:340px;border-radius:9px;margin-top:12px;background:#000;display:none}
+  video.on{display:block}
+
+  footer{padding:12px 22px;border-top:1px solid var(--line);color:#4a5361;font-size:11.5px}
+  a{color:var(--accent)}
+  code{font-family:ui-monospace,Menlo,monospace;background:var(--panel2);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Archive Link Converter</h1>
+  <p>Paste any archive.org item link → get the direct video file links.</p>
+</header>
+
+<div class="wrap">
+  <div class="bar">
+    <input id="in" type="text" spellcheck="false" autocomplete="off"
+           placeholder="https://archive.org/details/Gung_Ho">
+    <button class="primary" id="go">Get video links</button>
+    <button id="clear">Clear</button>
+  </div>
+
+  <main>
+    <div class="status" id="status">Waiting for a link.</div>
+    <div id="out"></div>
+  </main>
+</div>
+
+<footer>
+  Works with <code>/details/</code>, <code>/download/</code>, <code>/metadata/</code>, or a bare identifier.
+  Uses the public <code>archive.org/metadata/&lt;id&gt;</code> API — no key, no server, runs entirely in your browser.
+</footer>
+
+<script>
+(function(){
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const input=$('in'), out=$('out'), status=$('status');
+
+  const VIDEO_EXT = ['mp4','mkv','webm','ogv','avi','m4v','mpg','mpeg','mov','wmv','flv','ts','ogm'];
+  const AUDIO_EXT = ['mp3','ogg','oga','flac','m4a','wav','opus','aac'];
+
+  /* ---------- identifier extraction (mirrors archive-dl.py) ---------- */
+  function extractIdentifier(raw){
+    raw = (raw||'').trim().replace(/^["']|["']$/g,'');
+    if(!raw) return '';
+    if(!raw.includes('://') && !raw.includes('/')) return raw;      // bare id
+    if(!raw.includes('://')) raw = 'https://' + raw;                 // scheme-less
+    let path;
+    try { path = new URL(raw).pathname; }
+    catch(e){ return raw.split('/').filter(Boolean).pop() || ''; }
+    const prefixes = ['/details/','/download/','/metadata/','/embed/','/stream/'];
+    for(const p of prefixes){
+      const i = path.indexOf(p);
+      if(i >= 0){
+        const rest = path.slice(i + p.length);
+        return decodeURIComponent(rest.split('/')[0] || '').trim();
+      }
+    }
+    const segs = path.split('/').filter(Boolean);
+    return segs.length ? decodeURIComponent(segs[segs.length-1]).trim() : '';
+  }
+
+  function extOf(name){ const b=name.split('?')[0], i=b.lastIndexOf('.'); return i>0 ? b.slice(i+1).toLowerCase() : ''; }
+  function isVideo(name){ return VIDEO_EXT.includes(extOf(name)); }
+  function isAudio(name){ return AUDIO_EXT.includes(extOf(name)); }
+
+  function humanSize(n){
+    n = Number(n);
+    if(!isFinite(n) || n<=0) return '';
+    const u=['B','KB','MB','GB','TB']; let i=0;
+    while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+    return (i===0 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+  }
+  // Truncate, don't round: media durations are conventionally floored (1h25m59s
+  // reads as 1h25m), and this keeps the browser output identical to archive-dl.py.
+  function humanTime(s){
+    s = Math.floor(Number(s));
+    if(!isFinite(s) || s<=0) return '';
+    const h=Math.floor(s/3600), m=Math.floor((s%3600)/60), ss=s%60;
+    return h ? h+'h'+String(m).padStart(2,'0')+'m' : m+'m'+String(ss).padStart(2,'0')+'s';
+  }
+  function esc(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+  // Prefer h.264 / MPEG4 derivatives; originals (DivX, WMV...) last.
+  function rankVideo(f){
+    const fmt = String(f.format||'').toLowerCase();
+    const pref = (fmt==='h.264'||fmt==='mpeg4') ? 0 : 1;
+    const src  = f.source==='derivative' ? 0 : 1;
+    return [pref, src, f.name||''];
+  }
+  function sortVideos(a,b){
+    const ra=rankVideo(a), rb=rankVideo(b);
+    for(let i=0;i<3;i++){ if(ra[i]<rb[i]) return -1; if(ra[i]>rb[i]) return 1; }
+    return 0;
+  }
+
+  function directUrl(id, name){
+    return 'https://archive.org/download/' + encodeURIComponent(id) + '/' + encodeURIComponent(name);
+  }
+
+  function setStatus(html, isErr){
+    status.innerHTML = html;
+    status.className = 'status' + (isErr ? ' err' : '');
+  }
+
+  /* ---------- main ---------- */
+  async function convert(){
+    const raw = input.value.trim();
+    out.innerHTML = '';
+    if(!raw){ setStatus('Paste a link first.'); return; }
+
+    const id = extractIdentifier(raw);
+    if(!id){ setStatus('Could not find an identifier in that link.', true); return; }
+
+    setStatus('Looking up <b>' + esc(id) + '</b>&hellip;');
+
+    let meta;
+    try{
+      const r = await fetch('https://archive.org/metadata/' + encodeURIComponent(id));
+      if(!r.ok){ setStatus('archive.org returned HTTP ' + r.status + ' for <b>' + esc(id) + '</b>.', true); return; }
+      meta = await r.json();
+    }catch(e){
+      setStatus('Request failed: ' + esc(e.message || String(e)) +
+                '<br><br>This page needs to reach archive.org directly. A network block, ' +
+                'an offline connection, or a browser extension can stop it.', true);
+      return;
+    }
+
+    if(meta && meta.is_dark){
+      setStatus('<b>' + esc(id) + '</b> is restricted on archive.org — no files are available.', true); return;
+    }
+    const files = Array.isArray(meta && meta.files) ? meta.files : [];
+    if(!files.length){
+      setStatus('No files found for <b>' + esc(id) + '</b>. Check the identifier.', true); return;
+    }
+
+    // Filter to real media: skip thumbnails, Archive bookkeeping, hidden files.
+    const sidecar = /(_meta\.(xml|sqlite)|_files\.xml|_archive\.torrent|_reviews\.xml)$/i;
+    const media = files.filter(f=>{
+      const n = f.name || '';
+      if(!n || n.startsWith('__') || n.endsWith('.afpk')) return false;
+      if(n.includes('.thumbs/') || n.includes('/thumbs/')) return false;
+      if(sidecar.test(n)) return false;
+      if(n.startsWith('.')) return false;
+      return isVideo(n) || isAudio(n);
+    });
+
+    const vids = media.filter(f=>isVideo(f.name)).sort(sortVideos);
+    const auds = media.filter(f=>isAudio(f.name)).sort(sortVideos);
+
+    if(!vids.length && !auds.length){
+      setStatus('No video or audio files in <b>' + esc(id) + '</b>. ' +
+                'It has ' + files.length + ' file(s), but none are media.', true);
+      return;
+    }
+
+    const md = meta.metadata || {};
+    const title = Array.isArray(md.title) ? md.title[0] : (md.title || id);
+
+    setStatus((vids.length ? vids.length + ' video' + (vids.length>1?'s':'') : '') +
+              (vids.length && auds.length ? ' + ' : '') +
+              (auds.length ? auds.length + ' audio file' + (auds.length>1?'s':'') : '') +
+              ' found. The <b>first</b> one is the one you want — ' +
+              'it is the transcoded copy, not the uploader\'s original.');
+
+    out.appendChild(headerFor(id, title, md));
+
+    const wrap = document.createElement('div');
+    vids.forEach(f => wrap.appendChild(card(id, f, 'video')));
+    auds.forEach(f => wrap.appendChild(card(id, f, 'audio')));
+    out.appendChild(wrap);
+  }
+
+  function headerFor(id, title, md){
+    const d = document.createElement('div');
+    d.className = 'item';
+    let s = '<b>' + esc(title) + '</b><br>archive.org/details/' + esc(id);
+    if(md.uploader) s += ' &middot; uploaded by ' + esc(Array.isArray(md.uploader)?md.uploader[0]:md.uploader);
+    if(md.licenseurl) s += '<br>License: <a href="' + esc(Array.isArray(md.licenseurl)?md.licenseurl[0]:md.licenseurl) + '" target="_blank" rel="noopener">' + esc(Array.isArray(md.licenseurl)?md.licenseurl[0]:md.licenseurl) + '</a>';
+    d.innerHTML = s;
+    return d;
+  }
+
+  function card(id, f, kind){
+    const name = f.name;
+    const url  = directUrl(id, name);
+    const perf = kind === 'video' && /^h\.?264$/i.test(String(f.format||'')) ||
+                 kind === 'video' && String(f.format||'').toLowerCase() === 'mpeg4';
+
+    const el = document.createElement('div');
+    el.className = 'card';
+
+    const badges = [];
+    badges.push('<span class="b' + (f.source==='derivative' ? ' hl' : '') + '">' +
+                esc(f.format || extOf(name) || '?') + '</span>');
+    if(f.size) badges.push('<span class="b">' + humanSize(f.size) + '</span>');
+    if(f.length) badges.push('<span class="b">' + humanTime(f.length) + '</span>');
+    if(f.width && f.height) badges.push('<span class="b">' + f.width + '&times;' + f.height + '</span>');
+    if(f.source) badges.push('<span class="b">' + esc(f.source) + '</span>');
+
+    el.innerHTML =
+      '<div class="top"><div class="fname">' + esc(name) + '</div></div>' +
+      '<div class="badges">' + badges.join('') + '</div>' +
+      '<div class="urlbox"><input type="text" readonly value="' + esc(url) + '"></div>' +
+      '<div class="acts">' +
+        '<button class="copy">Copy link</button>' +
+        '<button class="open">Open in new tab</button>' +
+        '<button class="save">Save file&hellip;</button>' +
+        (kind === 'video' ? '<button class="prev">Preview</button>' : '') +
+      '</div>' +
+      '<div class="prog"><div class="track"><div class="fill"></div></div><div class="ptxt"></div></div>' +
+      (kind === 'video' ? '<video controls preload="none" playsinline></video>' : '');
+
+    const urlIn = el.querySelector('.urlbox input');
+    const copyBtn = el.querySelector('.copy');
+    copyBtn.addEventListener('click', async ()=>{
+      try{
+        await navigator.clipboard.writeText(url);
+      }catch(e){
+        urlIn.select(); document.execCommand && document.execCommand('copy');
+      }
+      const t = copyBtn.textContent;
+      copyBtn.textContent = 'Copied'; copyBtn.classList.add('ok');
+      setTimeout(()=>{ copyBtn.textContent = t; copyBtn.classList.remove('ok'); }, 1200);
+    });
+    copyBtn.addEventListener('dblclick', ()=>{ urlIn.select(); });
+
+    el.querySelector('.open').addEventListener('click', ()=>{
+      window.open(url, '_blank', 'noopener');
+    });
+
+    el.querySelector('.save').addEventListener('click', ()=>saveFile(url, name, el));
+
+    const pv = el.querySelector('.prev');
+    if(pv){
+      const v = el.querySelector('video');
+      pv.addEventListener('click', ()=>{
+        if(v.classList.contains('on')){
+          v.classList.remove('on'); v.pause(); v.removeAttribute('src'); v.load();
+          pv.textContent = 'Preview';
+        }else{
+          v.src = url; v.classList.add('on'); v.play().catch(()=>{});
+          pv.textContent = 'Close preview';
+        }
+      });
+    }
+    return el;
+  }
+
+  /* Streamed save with progress. archive.org sends Access-Control-Allow-Origin: *
+     and honours Range requests, so this works from a plain file:// page. Falls back
+     to opening the URL in a new tab where the File System Access API is absent
+     (Firefox, Safari). */
+  async function saveFile(url, name, el){
+    const prog = el.querySelector('.prog');
+    const fill = el.querySelector('.fill');
+    const ptxt = el.querySelector('.ptxt');
+    const saveBtn = el.querySelector('.save');
+
+    if(!window.showSaveFilePicker){
+      // No streaming target available — let the browser handle it.
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.rel = 'noopener';
+      document.body.appendChild(a); a.click(); a.remove();
+      return;
+    }
+
+    let handle;
+    try{
+      handle = await window.showSaveFilePicker({ suggestedName: name });
+    }catch(e){
+      return;   // user cancelled
+    }
+
+    prog.classList.add('on');
+    saveBtn.disabled = true;
+    fill.style.width = '0%';
+    ptxt.textContent = 'starting…';
+
+    try{
+      const r = await fetch(url);
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      const total = Number(r.headers.get('Content-Length')) || 0;
+      const writable = await handle.createWritable();
+      const reader = r.body.getReader();
+      let done = 0, t0 = performance.now();
+
+      for(;;){
+        const { value, done: fin } = await reader.read();
+        if(fin) break;
+        await writable.write(value);
+        done += value.length;
+        const secs = Math.max((performance.now()-t0)/1000, 1e-6);
+        if(total){
+          fill.style.width = (100*done/total).toFixed(1) + '%';
+          ptxt.textContent = humanSize(done) + ' / ' + humanSize(total) +
+                             '  ·  ' + humanSize(done/secs) + '/s';
+        }else{
+          ptxt.textContent = humanSize(done) + '  ·  ' + humanSize(done/secs) + '/s';
+        }
+      }
+      await writable.close();
+      fill.style.width = '100%';
+      ptxt.textContent = 'Done — ' + humanSize(done) + ' saved as ' + name;
+      saveBtn.textContent = 'Saved'; saveBtn.classList.add('ok');
+    }catch(e){
+      ptxt.textContent = 'Failed: ' + (e.message || e);
+      fill.style.width = '0%';
+    }finally{
+      saveBtn.disabled = false;
+      setTimeout(()=>{ prog.classList.remove('on'); }, 4000);
+    }
+  }
+
+  /* ---------- wiring ---------- */
+  $('go').addEventListener('click', convert);
+  input.addEventListener('keydown', e => { if(e.key === 'Enter') convert(); });
+  input.addEventListener('paste', () => setTimeout(convert, 60));
+  $('clear').addEventListener('click', ()=>{
+    input.value=''; out.innerHTML=''; setStatus('Waiting for a link.'); input.focus();
+  });
+  input.focus();
+})();
+</script>
+</body>
+</html>
