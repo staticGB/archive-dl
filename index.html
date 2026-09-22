@@ -281,17 +281,34 @@
 
     const urlIn = el.querySelector('.urlbox input');
     const copyBtn = el.querySelector('.copy');
+
+    // Clipboard API first, with a timeout so a hung or permission-blocked promise
+    // can never leave the button stuck. Fall back to execCommand, and if even that
+    // fails, say so instead of lying with a "Copied" label. The URL is selected
+    // either way so a manual Ctrl+C always works.
     copyBtn.addEventListener('click', async ()=>{
+      urlIn.focus(); urlIn.select();
+      const label = copyBtn.textContent;
+      let ok = false;
+
       try{
-        await navigator.clipboard.writeText(url);
+        await Promise.race([
+          navigator.clipboard.writeText(url),
+          new Promise((_, rej)=>setTimeout(()=>rej(new Error('clipboard timeout')), 800))
+        ]);
+        ok = true;
       }catch(e){
-        urlIn.select(); document.execCommand && document.execCommand('copy');
+        try{ ok = document.execCommand('copy'); }catch(e2){ ok = false; }
       }
-      const t = copyBtn.textContent;
-      copyBtn.textContent = 'Copied'; copyBtn.classList.add('ok');
-      setTimeout(()=>{ copyBtn.textContent = t; copyBtn.classList.remove('ok'); }, 1200);
+
+      copyBtn.textContent = ok ? 'Copied' : 'Press Ctrl+C';
+      copyBtn.classList.add(ok ? 'ok' : '');
+      setTimeout(()=>{
+        copyBtn.textContent = label;
+        copyBtn.classList.remove('ok');
+      }, 1400);
     });
-    copyBtn.addEventListener('dblclick', ()=>{ urlIn.select(); });
+    copyBtn.addEventListener('dblclick', ()=>{ urlIn.focus(); urlIn.select(); });
 
     el.querySelector('.open').addEventListener('click', ()=>{
       window.open(url, '_blank', 'noopener');
