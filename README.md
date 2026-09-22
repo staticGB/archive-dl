@@ -20,9 +20,17 @@ https://archive.org/details/Gung_Ho
 You get back every video file in that item, with its size, runtime and resolution, plus:
 
 - **Copy link** — the direct `archive.org/download/...` URL, straight to your clipboard
-- **Open in new tab** — plays or saves in the browser
-- **Save file…** — downloads with a live progress bar (Chrome/Edge)
+- **The link itself is clickable** — click to play, or **right-click → Save link as…** to download
 - **Preview** — inline player, no download
+
+> **Why there's no "Save" button.** A page cannot read those file bytes. `archive.org/download/<id>/<file>`
+> 302-redirects to a storage node (`dn*.archive.org`) that sends **no** `Access-Control-Allow-Origin`
+> header, so `fetch()` follows the redirect and the browser then blocks the body — you get
+> `TypeError: Failed to fetch`. The `/download/` URL *itself* does send `Access-Control-Allow-Origin: *`,
+> which makes it very easy to assume the whole chain is CORS-enabled. It isn't. No `Content-Disposition`
+> is sent either, so script can't force a save. Right-click → Save link as bypasses all of it, because
+> the browser does the download natively instead of JavaScript. Use `archive-dl.py` if you want
+> scripted downloads with progress and resume.
 
 ### Deploying to GitHub Pages
 
@@ -67,9 +75,19 @@ The identifier is the segment after `/details/`. The metadata endpoint lists eve
 file in the item, and the download URL is just those two pieces joined. That's the
 whole mechanism — this project is a convenience wrapper around it.
 
-Both endpoints send `Access-Control-Allow-Origin: *`, and the download endpoint
-honours `Range` requests, which is why the browser version can stream a real
-progress bar instead of navigating away.
+**The two endpoints do not have the same CORS posture, and that matters.**
+
+| endpoint | `Access-Control-Allow-Origin` |
+|---|---|
+| `archive.org/metadata/<id>` | `*` — usable from a browser |
+| `archive.org/download/<id>/<file>` (302) | `*` |
+| the storage node it redirects to | **absent** |
+
+So JavaScript can read the *listing* but never the *file*. `fetch()` follows the
+redirect and then the browser refuses to hand over the body. This is why the web
+version hands you a real `<a href>` link rather than a download button — the
+browser's native right-click → Save link as is the only thing that works, and it
+never goes through fetch. The CLI has no such restriction.
 
 ## Things worth knowing
 

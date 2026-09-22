@@ -53,17 +53,13 @@
   .card .acts{display:flex;gap:7px;flex-wrap:wrap;margin-top:12px}
   .card .acts button{font-size:12px;padding:8px 12px}
 
-  .urlbox{display:flex;gap:7px;margin-top:11px}
-  .urlbox input{flex:1;background:#0a0c0f;border:1px solid var(--line);color:var(--dim);
-    border-radius:8px;padding:9px 11px;font:12px/1.4 ui-monospace,Menlo,monospace;min-width:0}
-  .urlbox input:focus{outline:none;border-color:var(--accent);color:var(--txt)}
-
-  .prog{margin-top:11px;display:none}
-  .prog.on{display:block}
-  .track{height:7px;background:#0a0c0f;border-radius:4px;overflow:hidden;border:1px solid var(--line)}
-  .fill{height:100%;width:0;background:var(--accent);transition:width .12s linear}
-  .ptxt{font-size:11px;color:var(--dim);margin-top:5px;font-family:ui-monospace,Menlo,monospace}
-
+  .urlbox{display:flex;gap:7px;margin-top:11px;align-items:stretch}
+  .urlbox a{flex:1;background:#0a0c0f;border:1px solid var(--line);color:var(--dim);
+    border-radius:8px;padding:9px 11px;font:12px/1.4 ui-monospace,Menlo,monospace;
+    min-width:0;overflow-wrap:anywhere;word-break:break-all;text-decoration:none}
+  .urlbox a:hover{border-color:var(--accent);color:var(--accent)}
+  .hint{font-size:11.5px;color:#6b7482;margin-top:7px}
+  .hint b{color:var(--txt);font-weight:600}
   video{width:100%;max-height:340px;border-radius:9px;margin-top:12px;background:#000;display:none}
   video.on{display:block}
 
@@ -95,7 +91,10 @@
 
 <footer>
   Works with <code>/details/</code>, <code>/download/</code>, <code>/metadata/</code>, or a bare identifier.
-  Uses the public <code>archive.org/metadata/&lt;id&gt;</code> API — no key, no server, runs entirely in your browser.
+  Uses the public <code>archive.org/metadata/&lt;id&gt;</code> API — no key, no server, runs in your browser.
+  <br>To download a file: <b>right-click its link → Save link as…</b> &nbsp;·&nbsp;
+  this page cannot fetch the bytes itself, because archive.org redirects to a storage node
+  that sends no CORS headers.
 </footer>
 
 <script>
@@ -269,26 +268,34 @@
     el.innerHTML =
       '<div class="top"><div class="fname">' + esc(name) + '</div></div>' +
       '<div class="badges">' + badges.join('') + '</div>' +
-      '<div class="urlbox"><input type="text" readonly value="' + esc(url) + '"></div>' +
+      '<div class="urlbox"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></div>' +
+      '<div class="hint">Right-click that link &rarr; <b>Save link as&hellip;</b> to download. ' +
+                     'Or click it to play.</div>' +
       '<div class="acts">' +
         '<button class="copy">Copy link</button>' +
-        '<button class="open">Open in new tab</button>' +
-        '<button class="save">Save file&hellip;</button>' +
         (kind === 'video' ? '<button class="prev">Preview</button>' : '') +
       '</div>' +
-      '<div class="prog"><div class="track"><div class="fill"></div></div><div class="ptxt"></div></div>' +
       (kind === 'video' ? '<video controls preload="none" playsinline></video>' : '');
 
-    const urlIn = el.querySelector('.urlbox input');
+    const urlA = el.querySelector('.urlbox a');
     const copyBtn = el.querySelector('.copy');
 
-    // Clipboard API first, with a timeout so a hung or permission-blocked promise
-    // can never leave the button stuck. Fall back to execCommand, and if even that
-    // fails, say so instead of lying with a "Copied" label. The URL is selected
-    // either way so a manual Ctrl+C always works.
+    // Select the visible link text so a manual Ctrl+C works when the clipboard API is blocked.
+    function selectLink(){
+      try{
+        const r = document.createRange();
+        r.selectNodeContents(urlA);
+        const s = window.getSelection();
+        s.removeAllRanges(); s.addRange(r);
+      }catch(e){}
+    }
+
+    // Clipboard API first, with a timeout so a hung or permission-blocked promise can
+    // never leave the button stuck. Fall back to execCommand, and if even that fails,
+    // say so instead of lying with a "Copied" label.
     copyBtn.addEventListener('click', async ()=>{
       const label = copyBtn.textContent;
-      urlIn.focus(); urlIn.select();
+      selectLink();
       let ok = false;
 
       try{
@@ -298,10 +305,9 @@
         ]);
         ok = true;
       }catch(e){
-        // Focus has moved to the button by now, which collapsed the selection,
-        // so re-establish it before copying. execCommand('copy') acts on the
-        // current selection -- without this the fallback copies nothing.
-        urlIn.focus(); urlIn.select();
+        // execCommand('copy') acts on the current selection, which the click may
+        // have collapsed -- so re-establish it before copying.
+        selectLink();
         try{ ok = document.execCommand('copy'); }catch(e2){ ok = false; }
       }
 
@@ -312,16 +318,9 @@
         copyBtn.classList.remove('ok');
       }, 1400);
 
-      // Leave the URL selected after a failed copy so a manual Ctrl+C works.
-      if(!ok){ urlIn.focus(); urlIn.select(); }
+      // Leave the link selected after a failed copy so a manual Ctrl+C works.
+      if(!ok) selectLink();
     });
-    copyBtn.addEventListener('dblclick', ()=>{ urlIn.focus(); urlIn.select(); });
-
-    el.querySelector('.open').addEventListener('click', ()=>{
-      window.open(url, '_blank', 'noopener');
-    });
-
-    el.querySelector('.save').addEventListener('click', ()=>saveFile(url, name, el));
 
     const pv = el.querySelector('.prev');
     if(pv){
@@ -339,70 +338,17 @@
     return el;
   }
 
-  /* Streamed save with progress. archive.org sends Access-Control-Allow-Origin: *
-     and honours Range requests, so this works from a plain file:// page. Falls back
-     to opening the URL in a new tab where the File System Access API is absent
-     (Firefox, Safari). */
-  async function saveFile(url, name, el){
-    const prog = el.querySelector('.prog');
-    const fill = el.querySelector('.fill');
-    const ptxt = el.querySelector('.ptxt');
-    const saveBtn = el.querySelector('.save');
+  /* NOTE: there is deliberately no "streamed save with progress" here.
+     It cannot work. archive.org/download/<id>/<file> 302-redirects to a storage
+     node (dn*.archive.org) that sends NO Access-Control-Allow-Origin header, so
+     fetch() follows the redirect and the browser then blocks reading the body --
+     "TypeError: Failed to fetch". The /download/ URL itself does send
+     Access-Control-Allow-Origin: *, which is easy to mistake for the whole chain
+     being CORS-enabled. No Content-Disposition header is sent either, so there is
+     no way to force a save from script. The link is rendered as a real <a> instead,
+     and the browser's own right-click -> "Save link as..." does the download
+     without ever going through fetch. */
 
-    if(!window.showSaveFilePicker){
-      // No streaming target available — let the browser handle it.
-      const a = document.createElement('a');
-      a.href = url; a.download = name; a.rel = 'noopener';
-      document.body.appendChild(a); a.click(); a.remove();
-      return;
-    }
-
-    let handle;
-    try{
-      handle = await window.showSaveFilePicker({ suggestedName: name });
-    }catch(e){
-      return;   // user cancelled
-    }
-
-    prog.classList.add('on');
-    saveBtn.disabled = true;
-    fill.style.width = '0%';
-    ptxt.textContent = 'starting…';
-
-    try{
-      const r = await fetch(url);
-      if(!r.ok) throw new Error('HTTP ' + r.status);
-      const total = Number(r.headers.get('Content-Length')) || 0;
-      const writable = await handle.createWritable();
-      const reader = r.body.getReader();
-      let done = 0, t0 = performance.now();
-
-      for(;;){
-        const { value, done: fin } = await reader.read();
-        if(fin) break;
-        await writable.write(value);
-        done += value.length;
-        const secs = Math.max((performance.now()-t0)/1000, 1e-6);
-        if(total){
-          fill.style.width = (100*done/total).toFixed(1) + '%';
-          ptxt.textContent = humanSize(done) + ' / ' + humanSize(total) +
-                             '  ·  ' + humanSize(done/secs) + '/s';
-        }else{
-          ptxt.textContent = humanSize(done) + '  ·  ' + humanSize(done/secs) + '/s';
-        }
-      }
-      await writable.close();
-      fill.style.width = '100%';
-      ptxt.textContent = 'Done — ' + humanSize(done) + ' saved as ' + name;
-      saveBtn.textContent = 'Saved'; saveBtn.classList.add('ok');
-    }catch(e){
-      ptxt.textContent = 'Failed: ' + (e.message || e);
-      fill.style.width = '0%';
-    }finally{
-      saveBtn.disabled = false;
-      setTimeout(()=>{ prog.classList.remove('on'); }, 4000);
-    }
-  }
 
   /* ---------- wiring ---------- */
   $('go').addEventListener('click', convert);
